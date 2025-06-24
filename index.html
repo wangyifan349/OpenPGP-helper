@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>完整OpenPGP助手</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+<script src="https://unpkg.com/openpgp@5.7.0/dist/openpgp.min.js"></script>
+
+<style>
+  html, body {
+    height: 100%;
+    margin:0;
+    background: #f8f9fa;
+    overflow: hidden;
+  }
+  #app {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+  }
+  #sidebar {
+    width: 260px;
+    background: #343a40;
+    color: white;
+    transition: width 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  #sidebar.collapsed {
+    width: 0;
+  }
+  #sidebar .nav-link {
+    color: #ddd;
+    cursor: pointer;
+    user-select:none;
+  }
+  #sidebar .nav-link.active, #sidebar .nav-link:hover {
+    background-color: #495057;
+    color: white;
+  }
+  #sidebarHeader {
+    font-weight: bold;
+    text-align: center;
+    padding: 1rem 0;
+    border-bottom: 1px solid #495057;
+    user-select:none;
+  }
+  #sidebarToggle {
+    background: none;
+    border: none;
+    color: white;
+    padding: 0.25rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    border-bottom: 1px solid #495057;
+    user-select:none;
+  }
+  #main {
+    flex-grow: 1;
+    padding: 1rem 1.5rem;
+    overflow-y: auto;
+  }
+  textarea, pre {
+    font-family: monospace;
+    font-size: 0.9rem;
+    resize: vertical;
+  }
+  .logbox {
+    background: #212529;
+    color: #f8f9fa;
+    height: 120px;
+    overflow-y: auto;
+    padding: 0.6rem;
+    border-radius: 0.3rem;
+    white-space: pre-wrap;
+    user-select: text;
+  }
+  label {
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 侧边栏 -->
+  <nav id="sidebar" aria-label="主菜单">
+    <div id="sidebarHeader">PGP助手完整版</div>
+    <button id="sidebarToggle" title="折叠/展开菜单">收起菜单 &lt;</button>
+
+    <ul class="nav flex-column px-2 mt-2" role="menu" aria-orientation="vertical" aria-labelledby="sidebarHeader">
+      <li class="nav-item" role="none"><a href="#" class="nav-link active" data-panel="createKey" role="menuitem" tabindex="0">生成密钥对</a></li>
+      <li class="nav-item" role="none"><a href="#" class="nav-link" data-panel="contacts" role="menuitem" tabindex="-1">联系人管理</a></li>
+      <li class="nav-item" role="none"><a href="#" class="nav-link" data-panel="uploadPrivateKey" role="menuitem" tabindex="-1">上传并解锁私钥</a></li>
+      <li class="nav-item" role="none"><a href="#" class="nav-link" data-panel="sendMessage" role="menuitem" tabindex="-1">发送消息（加密+签名）</a></li>
+      <li class="nav-item" role="none"><a href="#" class="nav-link" data-panel="receiveMessage" role="menuitem" tabindex="-1">接收消息（解密+验签）</a></li>
+    </ul>
+
+    <div class="mt-auto p-3 small text-center" style="user-select:none;">&copy; 2024 PGP助手</div>
+  </nav>
+
+  <!-- 主区域 -->
+  <main id="main" tabindex="0" aria-live="polite" aria-relevant="additions">
+    <!-- 面板容器 -->
+    <section id="createKey" class="panel">
+      <h2>生成密钥对</h2>
+
+      <form id="createKeyForm" class="mb-3" autocomplete="off" novalidate>
+        <div class="mb-2">
+          <label for="createName">姓名 *</label>
+          <input id="createName" class="form-control" required autocomplete="name" />
+        </div>
+
+        <div class="mb-2">
+          <label for="createEmail">邮箱 *</label>
+          <input id="createEmail" type="email" class="form-control" required autocomplete="email" />
+        </div>
+
+        <div class="mb-2">
+          <label for="createPassphrase">口令(保护私钥) *</label>
+          <input id="createPassphrase" type="password" class="form-control" required autocomplete="new-password" />
+        </div>
+
+        <div class="mb-2">
+          <label for="createKeyType">密钥类型</label>
+          <select id="createKeyType" class="form-select" aria-label="选择密钥类型">
+            <option value="rsa" selected>RSA</option>
+            <option value="ecc">ECC （Curve25519）</option>
+          </select>
+        </div>
+
+        <div class="mb-3" id="rsaBitsWrapper">
+          <label for="createKeyBits">RSA密钥长度（位）</label>
+          <select id="createKeyBits" class="form-select" aria-label="选择RSA密钥长度">
+            <option value="2048">2048</option>
+            <option value="3072" selected>3072</option>
+            <option value="4096">4096</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">开始生成密钥对</button>
+      </form>
+
+      <label for="createdPrivateKey">私钥 (ASCII armored)</label>
+      <textarea id="createdPrivateKey" class="form-control mb-3" rows="8" readonly spellcheck="false"></textarea>
+
+      <label for="createdPublicKey">公钥 (ASCII armored)</label>
+      <textarea id="createdPublicKey" class="form-control mb-3" rows="8" readonly spellcheck="false"></textarea>
+    </section>
+
+    <section id="contacts" class="panel d-none">
+      <h2>联系人管理</h2>
+
+      <form id="addContactForm" class="mb-3" autocomplete="off" novalidate>
+        <div class="mb-2">
+          <label for="contactName">联系人姓名 *</label>
+          <input id="contactName" class="form-control" required autocomplete="off" />
+        </div>
+
+        <div class="mb-2">
+          <label for="contactPublicKey">联系人公钥 (ASCII armored) *</label>
+          <textarea id="contactPublicKey" rows="6" class="form-control" required spellcheck="false"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary">添加/更新联系人</button>
+      </form>
+
+      <label for="contactSelect">现有联系人：</label>
+      <select id="contactSelect" class="form-select mb-2" aria-label="联系人选择"></select>
+      <button id="deleteContactBtn" class="btn btn-danger mb-3">删除选中联系人</button>
+    </section>
+
+    <section id="uploadPrivateKey" class="panel d-none">
+      <h2>上传并解锁私钥</h2>
+      <input type="file" id="privateKeyFileInput" class="form-control mb-2" accept=".asc,.txt" aria-label="选择私钥文件" />
+      <input type="password" id="privateKeyPassphrase" class="form-control mb-2" placeholder="请输入私钥密码（如果有）" aria-label="私钥密码" autocomplete="current-password" />
+      <button id="loadPrivateKeyBtn" class="btn btn-success">导入并解锁私钥</button>
+      <small id="privateKeyStatus" class="form-text mt-1 text-info" aria-live="polite"></small>
+    </section>
+
+    <section id="sendMessage" class="panel d-none">
+      <h2>发送消息（加密+签名）</h2>
+
+      <label for="plainMessage">消息正文</label>
+      <textarea id="plainMessage" rows="6" class="form-control mb-2" placeholder="请输入消息"></textarea>
+
+      <label for="contactSelectSend">选择联系人（加密目标）</label>
+      <select id="contactSelectSend" class="form-select mb-2" aria-label="选择加密目标联系人"></select>
+
+      <button id="encryptSignBtn" class="btn btn-primary mb-3">加密并签名</button>
+
+      <label for="encryptedSignedMessage">加密并签名后的消息 (ASCII armored)</label>
+      <textarea id="encryptedSignedMessage" rows="8" class="form-control" readonly spellcheck="false"></textarea>
+    </section>
+
+    <section id="receiveMessage" class="panel d-none">
+      <h2>接收消息（解密+验签）</h2>
+
+      <label for="encryptedInput">粘贴加密并签名的消息</label>
+      <textarea id="encryptedInput" rows="8" class="form-control mb-2" spellcheck="false" placeholder="请输入加密消息"></textarea>
+
+      <button id="decryptVerifyBtn" class="btn btn-success mb-3">解密并验证签名</button>
+
+      <label for="decryptedOutput">解密后的消息</label>
+      <textarea id="decryptedOutput" rows="8" class="form-control" readonly></textarea>
+
+      <div id="verifySignatureResult" aria-live="polite" class="mt-3"></div>
+    </section>
+
+    <section id="logSection" class="mt-4">
+      <h3>操作日志</h3>
+      <div id="log" class="logbox" aria-live="polite" aria-atomic="true"></div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  (function(){
+    const logDiv = document.getElementById('log');
+    function log(msg) {
+      const now = new Date().toLocaleTimeString();
+      logDiv.textContent += `[${now}] ${msg}\n`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    // 本地存储联系人
+    const CONTACTS_KEY = 'pgp_contacts';
+
+    // 获取联系人字典 {name: armoredPubKey}
+    function getContacts() {
+      try {
+        const v = localStorage.getItem(CONTACTS_KEY);
+        if(!v) return {};
+        return JSON.parse(v);
+      } catch (e) { return {}; }
+    }
+    function saveContacts(c) {
+      localStorage.setItem(CONTACTS_KEY, JSON.stringify(c));
+    }
+
+    // 刷新联系人列表选项
+    function refreshContactSelects() {
+      const c = getContacts();
+      const selIds = ['contactSelect', 'contactSelectSend'];
+      selIds.forEach(id=>{
+        const sel = document.getElementById(id);
+        while(sel.firstChild) sel.removeChild(sel.firstChild);
+        Object.keys(c).forEach(name=>{
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          sel.appendChild(opt);
+        });
+      });
+    }
+
+    // 添加或更新联系人
+    function addContact(name, pubkey) {
+      const c = getContacts();
+      c[name] = pubkey;
+      saveContacts(c);
+      refreshContactSelects();
+      log(`联系人 "${name}" 已添加或更新`);
+    }
+
+    // 删除联系人
+    function deleteContact(name) {
+      const c = getContacts();
+      if(c[name]){
+        delete c[name];
+        saveContacts(c);
+        refreshContactSelects();
+        log(`联系人 "${name}" 已删除`);
+      }
+    }
+
+    // 当前已解锁私钥对象: openpgp.PrivateKey实例
+    let unlockedPrivateKey = null;
+
+    // 解锁私钥
+    async function unlockPrivateKey(armored, pass) {
+      try {
+        const privKey = await openpgp.readPrivateKey({armoredKey: armored});
+        if(pass)
+          return await openpgp.decryptKey({privateKey: privKey, passphrase: pass});
+        else
+          return privKey;
+      } catch(e) {
+        throw new Error('私钥解锁失败：'+e.message);
+      }
+    }
+
+    // 创建密钥对
+    async function createKeyPair({name, email, passphrase, keyType, keyBits}) {
+      if(keyType=='rsa'){
+        return await openpgp.generateKey({
+          type: 'rsa',
+          rsaBits: keyBits,
+          userIDs: [{name, email}],
+          passphrase,
+          format: 'armored'
+        });
+      } else if(keyType=='ecc'){
+        return await openpgp.generateKey({
+          type: 'ecc',
+          curve: 'curve25519',
+          userIDs: [{name, email}],
+          passphrase,
+          format: 'armored'
+        });
+      }
+      throw new Error('不支持的密钥类型');
+    }
+
+    // 选项及面板切换
+    const navLinks = document.querySelectorAll('#sidebar .nav-link');
+    const panels = document.querySelectorAll('section.panel');
+    function showPanel(panelId){
+      panels.forEach(p=>{
+        if(p.id === panelId){
+          p.classList.remove('d-none');
+          // focus第一个表单元素方便无障碍
+          const firstInput = p.querySelector('input,textarea,select,button');
+          if(firstInput) firstInput.focus();
+        } else {
+          p.classList.add('d-none');
+        }
+      });
+      navLinks.forEach(a=>{
+        if(a.dataset.panel===panelId){
+          a.classList.add('active');
+          a.tabIndex=0;
+        } else {
+          a.classList.remove('active');
+          a.tabIndex=-1;
+        }
+      });
+    }
+    navLinks.forEach(link=>{
+      link.addEventListener('click', e=>{
+        e.preventDefault();
+        showPanel(link.dataset.panel);
+      });
+    });
+
+    // 侧边栏折叠切换
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    sidebarToggle.addEventListener('click', ()=>{
+      if(sidebar.classList.contains('collapsed')){
+        sidebar.classList.remove('collapsed');
+        sidebarToggle.textContent = '收起菜单 <';
+        sidebarToggle.title = '折叠/展开菜单';
+      } else {
+        sidebar.classList.add('collapsed');
+        sidebarToggle.textContent = '> 展开菜单';
+        sidebarToggle.title = '折叠/展开菜单';
+      }
+    });
+
+    // 动态显示RSA密钥长度选择区域
+    const keyTypeSelector = document.getElementById('createKeyType');
+    const rsaBitsWrapper = document.getElementById('rsaBitsWrapper');
+    keyTypeSelector.addEventListener('change', () => {
+      if(keyTypeSelector.value === 'rsa')
+        rsaBitsWrapper.style.display = '';
+      else
+        rsaBitsWrapper.style.display = 'none';
+    });
+
+    // 页面初始化时根据密钥类型切换显示
+    if(keyTypeSelector.value !== 'rsa'){
+      rsaBitsWrapper.style.display = 'none';
+    }
+
+    // 生成密钥表单
+    document.getElementById('createKeyForm').addEventListener('submit', async(e)=>{
+      e.preventDefault();
+      const name = document.getElementById('createName').value.trim();
+      const email = document.getElementById('createEmail').value.trim();
+      const passphrase = document.getElementById('createPassphrase').value;
+      const keyType = keyTypeSelector.value;
+      const keyBits = parseInt(document.getElementById('createKeyBits').value,10);
+
+      if(!name || !email || !passphrase){
+        alert('姓名、邮箱和口令均为必填项');
+        return;
+      }
+      log('开始生成密钥对，请稍候...');
+      try{
+        const key = await createKeyPair({name, email, passphrase, keyType, keyBits});
+        document.getElementById('createdPrivateKey').value = key.privateKey;
+        document.getElementById('createdPublicKey').value = key.publicKey;
+        log('密钥对生成成功');
+        alert('密钥对生成完成，请妥善保存私钥！您可以将公钥复制添加到联系人管理');
+      } catch(err){
+        log('生成密钥失败: '+ err.message);
+        alert('生成密钥失败，请检查输入');
+      }
+    });
+
+    // 添加/更新联系人表单提交
+    document.getElementById('addContactForm').addEventListener('submit', (e)=>{
+      e.preventDefault();
+      const name = document.getElementById('contactName').value.trim();
+      const pubkey = document.getElementById('contactPublicKey').value.trim();
+      if(!name || !pubkey){
+        alert('请填写联系人姓名和公钥');
+        return;
+      }
+      addContact(name, pubkey);
+      e.target.reset();
+    });
+
+    // 删除联系人按钮
+    document.getElementById('deleteContactBtn').addEventListener('click', ()=>{
+      const sel = document.getElementById('contactSelect');
+      const name = sel.value;
+      if(!name){
+        alert('请选择联系人');
+        return;
+      }
+      if(confirm(`确认删除联系人 "${name}" 吗？`)){
+        deleteContact(name);
+      }
+    });
+
+    // 上传并解锁私钥
+    document.getElementById('loadPrivateKeyBtn').addEventListener('click', async ()=>{
+      const fileInput = document.getElementById('privateKeyFileInput');
+      const passphrase = document.getElementById('privateKeyPassphrase').value;
+      const status = document.getElementById('privateKeyStatus');
+      status.textContent = '';
+      if(fileInput.files.length === 0){
+        alert('请选择私钥文件');
+        return;
+      }
+      try {
+        const armored = await fileInput.files[0].text();
+        log('正在解锁私钥...');
+        const key = await unlockPrivateKey(armored, passphrase);
+        unlockedPrivateKey = key;
+        status.textContent = '私钥导入并成功解锁';
+        log('私钥解锁成功');
+      } catch(e){
+        status.textContent = '导入或解锁私钥失败，请检查密码和文件格式';
+        log('私钥解锁失败: '+ e.message);
+      }
+    });
+
+    // 发送消息（加密+签名）
+    document.getElementById('encryptSignBtn').addEventListener('click', async ()=>{
+      if(!unlockedPrivateKey){
+        alert('请先上传并解锁您的私钥');
+        return;
+      }
+      const message = document.getElementById('plainMessage').value.trim();
+      if(!message){
+        alert('请输入消息正文');
+        return;
+      }
+      const contactName = document.getElementById('contactSelectSend').value;
+      if(!contactName){
+        alert('请选择联系人');
+        return;
+      }
+      const contacts = getContacts();
+      const pubKeyArmored = contacts[contactName];
+      if(!pubKeyArmored){
+        alert('联系人公钥不存在');
+        return;
+      }
+      try{
+        log(`获取联系人 ${contactName} 公钥，开始加密并签名...`);
+        const publicKey = await openpgp.readKey({armoredKey: pubKeyArmored});
+        const encrypted = await openpgp.encrypt({
+          message: await openpgp.createMessage({text: message}),
+          encryptionKeys: publicKey,
+          signingKeys: unlockedPrivateKey,
+        });
+        document.getElementById('encryptedSignedMessage').value = encrypted;
+        log('消息加密并签名完成');
+      } catch(e){
+        log('加密并签名失败: '+ e.message);
+        alert('加密签名失败，查看日志');
+      }
+    });
+
+    // 接收消息（解密并验证签名）
+    document.getElementById('decryptVerifyBtn').addEventListener('click', async ()=>{
+      if(!unlockedPrivateKey){
+        alert('请先上传并解锁您的私钥');
+        return;
+      }
+      const armoredMsg = document.getElementById('encryptedInput').value.trim();
+      if(!armoredMsg){
+        alert('请输入加密消息');
+        return;
+      }
+      try{
+        log('开始解密并验证签名...');
+        const message = await openpgp.readMessage({armoredMessage: armoredMsg});
+        const contacts = getContacts();
+
+        // 载入所有联系人公钥用于签名验证
+        const pubKeys = [];
+        for(let armored of Object.values(contacts)){
+          try{
+            const k = await openpgp.readKey({armoredKey: armored});
+            pubKeys.push(k);
+          }catch{}
+        }
+
+        if(pubKeys.length===0){
+          alert('无联系人公钥，无法验证签名');
+          return;
+        }
+
+        const result = await openpgp.decrypt({
+          message,
+          verificationKeys: pubKeys,
+          decryptionKeys: unlockedPrivateKey,
+        });
+        document.getElementById('decryptedOutput').value = result.data;
+
+        // 验证签名状态
+        let valid = true;
+        let signerKeyId = '';
+        for(const sig of result.signatures){
+          try{
+            await sig.verified;
+            signerKeyId = sig.keyID.toHex();
+          }catch{
+            valid = false;
+            break;
+          }
+        }
+        const verifyDiv = document.getElementById('verifySignatureResult');
+        if(valid){
+          verifyDiv.innerHTML = `<div class="alert alert-success">签名验证成功，签名者Key ID: <code>${signerKeyId}</code></div>`;
+          log('解密并验签成功');
+        }else{
+          verifyDiv.innerHTML = `<div class="alert alert-danger">签名验证失败</div>`;
+          log('签名验证失败');
+        }
+      }catch(e){
+        log('解密或验签失败: '+ e.message);
+        alert('解密或验签失败，请检查输入');
+      }
+    });
+
+    // 初始化，刷新联系人选择
+    refreshContactSelects();
+
+    // 默认显示生成密钥面板
+    showPanel('createKey');
+
+  })();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+</body>
+</html>
