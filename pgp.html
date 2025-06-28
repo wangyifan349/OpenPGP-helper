@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>OpenPGP.js 字符串加密工具</title>
+    <!-- OpenPGP.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/openpgp/5.7.0/openpgp.min.js" integrity="sha512-/bFpq3K9NvV1JUF1SpPBu/EAIq3nr92Pw/p4IViFm7uEySTgQaI1bLIn+RgeDHPwUBy2KLJWMRBWjJdV8Mb1gA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- FontAwesome 图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-IDRdbfynZNhPClnSaEg2lV0Hfn5+e/Zc6i1bFQnGMS+yqpNkYoK+zVQOHxuwCcl/5LpvCigVrfVF0BIo12sv3A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- 引入Google字体 (可选) -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet" />
+    <style>
+        /* 全局样式和布局 */
+        * {
+            box-sizing: border-box;
+        }
+        body, html {
+            margin: 0; padding: 0;
+            height: 100%;
+            font-family: 'Roboto', Arial, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            display: flex;
+            overflow: hidden;
+        }
+        /* 侧边栏 */
+        #sidebar {
+            width: 260px;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            transition: width 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            min-height: 100vh;
+        }
+        #sidebar.collapsed {
+            width: 60px;
+        }
+        #sidebar .toggle {
+            cursor: pointer;
+            padding: 20px 20px;
+            font-size: 24px;
+            text-align: right;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        #sidebar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            flex-grow: 1;
+        }
+        #sidebar ul li {
+            padding: 16px 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: background-color 0.2s ease;
+        }
+        #sidebar ul li:hover,
+        #sidebar ul li.active {
+            background-color: #34495e;
+        }
+        #sidebar ul li i {
+            min-width: 24px;
+            text-align: center;
+            font-size: 18px;
+        }
+        #sidebar.collapsed ul li span {
+            display: none;
+        }
+        /* 主体内容 */
+        #content {
+            flex-grow: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        h2 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        /* 表单元素 */
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #34495e;
+        }
+        input[type="text"], input[type="email"], input[type="password"], textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: monospace, monospace;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus,
+        input[type="email"]:focus,
+        input[type="password"]:focus,
+        textarea:focus,
+        select:focus {
+            border-color: #2980b9;
+            outline: none;
+            box-shadow: 0 0 4px rgba(41,128,185,.4);
+        }
+        textarea {
+            min-height: 100px;
+        }
+        button {
+            background-color: #2980b9;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            user-select: none;
+            margin-top: 8px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #3498db;
+        }
+        pre.output {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background-color: #ecf0f1;
+            padding: 12px;
+            border-radius: 5px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace, monospace;
+            margin-top: 12px;
+            border: 1px solid #bdc3c7;
+            position: relative;
+        }
+        /* 复制按钮 */
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.1);
+            border: none;
+            color: #2c3e50;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .copy-btn:hover {
+            background: rgba(0,0,0,0.2);
+        }
+        /* 错误提示 */
+        .error-message {
+            color: #e74c3c;
+            margin-top: 8px;
+            font-weight: bold;
+        }
+        /* 安全提示 */
+        .security-notice {
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 12px;
+            border-radius: 5px;
+            margin-top: 16px;
+            border: 1px solid #ffeeba;
+        }
+        /* 响应式支持 */
+        @media (max-width: 768px) {
+            #sidebar {
+                position: fixed;
+                z-index: 1000;
+                height: 100%;
+                left: -260px;
+                transition: left 0.3s;
+            }
+            #sidebar.active {
+                left: 0;
+            }
+            #content {
+                padding: 16px;
+                margin-left: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 侧边导航 -->
+    <nav id="sidebar">
+        <div class="toggle" id="sidebarToggle" title="切换导航栏"><i class="fas fa-bars"></i></div>
+        <ul>
+            <li class="active" data-section="section-generate"><i class="fas fa-key"></i><span>生成密钥</span></li>
+            <li data-section="section-import"><i class="fas fa-file-import"></i><span>导入密钥</span></li>
+            <li data-section="section-encrypt"><i class="fas fa-lock"></i><span>加密消息</span></li>
+            <li data-section="section-decrypt"><i class="fas fa-unlock"></i><span>解密消息</span></li>
+            <li data-section="section-sign"><i class="fas fa-pen-alt"></i><span>签名消息</span></li>
+            <li data-section="section-verify"><i class="fas fa-check-circle"></i><span>验证签名</span></li>
+        </ul>
+    </nav>
+
+    <!-- 主内容区域 -->
+    <main id="content">
+
+        <!-- 生成密钥 -->
+        <section id="section-generate" class="active">
+            <h2>生成密钥</h2>
+            <label for="gen-name">姓名</label>
+            <input type="text" id="gen-name" placeholder="请输入姓名" autocomplete="off" />
+            <label for="gen-email">电子邮件</label>
+            <input type="email" id="gen-email" placeholder="请输入电子邮件" autocomplete="off" />
+            <label for="gen-algorithm">算法</label>
+            <select id="gen-algorithm">
+                <option value="rsa-2048">RSA - 2048位</option>
+                <option value="rsa-4096">RSA - 4096位</option>
+                <option value="ecc-p256">ECC - P256曲线</option>
+                <option value="ecc-p384">ECC - P384曲线</option>
+                <option value="ecc-p521">ECC - P521曲线</option>
+            </select>
+            <label for="gen-passphrase">密码短语</label>
+            <input type="password" id="gen-passphrase" placeholder="请输入密码短语" autocomplete="new-password" />
+            <button id="btn-generate">生成密钥</button>
+
+            <div class="error-message" id="gen-error"></div>
+
+            <h3>公钥 <button class="copy-btn" data-copy-target="output-publickey">复制</button></h3>
+            <pre id="output-publickey" class="output" readonly></pre>
+            <h3>私钥 <button class="copy-btn" data-copy-target="output-privatekey">复制</button></h3>
+            <pre id="output-privatekey" class="output" readonly></pre>
+            <button id="btn-download-publickey">下载公钥</button>
+            <button id="btn-download-privatekey">下载私钥</button>
+
+            <div class="security-notice">
+                <strong>安全提示：</strong> 请妥善保管您的私钥和密码短语，避免私钥泄露导致安全风险。
+            </div>
+        </section>
+
+        <!-- 导入密钥 -->
+        <section id="section-import">
+            <h2>导入密钥</h2>
+            <label for="import-key-type">密钥类型</label>
+            <select id="import-key-type">
+                <option value="public">公钥</option>
+                <option value="private">私钥</option>
+            </select>
+            <label for="import-key-file">选择密钥文件</label>
+            <input type="file" id="import-key-file" accept=".asc" />
+            <button id="btn-import-key">导入密钥</button>
+
+            <div class="error-message" id="import-error"></div>
+
+            <h3>导入的密钥</h3>
+            <pre id="output-imported-key" class="output" readonly></pre>
+        </section>
+
+        <!-- 加密消息 -->
+        <section id="section-encrypt">
+            <h2>加密消息</h2>
+            <label for="enc-publickey">接收方公钥 (Armored 公钥格式)</label>
+            <textarea id="enc-publickey" placeholder="粘贴接收方的公开密钥"></textarea>
+            <label for="enc-message">要加密的消息</label>
+            <textarea id="enc-message" placeholder="输入需要加密的字符串"></textarea>
+            <button id="btn-encrypt">加密消息</button>
+
+            <div class="error-message" id="enc-error"></div>
+
+            <h3>加密结果 (Armored 格式) <button class="copy-btn" data-copy-target="output-encrypted">复制</button></h3>
+            <pre id="output-encrypted" class="output" readonly></pre>
+        </section>
+
+        <!-- 解密消息 -->
+        <section id="section-decrypt">
+            <h2>解密消息</h2>
+            <label for="dec-privatekey">您的私钥 (Armored 私钥格式)</label>
+            <textarea id="dec-privatekey" placeholder="粘贴您的私钥"></textarea>
+            <label for="dec-passphrase">密码短语</label>
+            <input type="password" id="dec-passphrase" placeholder="输入密码短语" autocomplete="current-password" />
+            <label for="dec-message">加密的消息</label>
+            <textarea id="dec-message" placeholder="粘贴要解密的加密字符串"></textarea>
+            <button id="btn-decrypt">解密消息</button>
+
+            <div class="error-message" id="dec-error"></div>
+
+            <h3>解密结果</h3>
+            <pre id="output-decrypted" class="output" readonly></pre>
+        </section>
+
+        <!-- 签名消息 -->
+        <section id="section-sign">
+            <h2>签名消息</h2>
+            <label for="sign-privatekey">您的私钥 (Armored 私钥格式)</label>
+            <textarea id="sign-privatekey" placeholder="粘贴您的私钥"></textarea>
+            <label for="sign-passphrase">密码短语</label>
+            <input type="password" id="sign-passphrase" placeholder="输入密码短语" autocomplete="current-password" />
+            <label for="sign-message">要签名的消息</label>
+            <textarea id="sign-message" placeholder="输入需要签名的字符串"></textarea>
+            <button id="btn-sign">签名消息</button>
+
+            <div class="error-message" id="sign-error"></div>
+
+            <h3>签名结果 (Armored 格式) <button class="copy-btn" data-copy-target="output-signed">复制</button></h3>
+            <pre id="output-signed" class="output" readonly></pre>
+        </section>
+
+        <!-- 验证签名 -->
+        <section id="section-verify">
+            <h2>验证签名</h2>
+            <label for="ver-publickey">发送方公钥 (Armored 公钥格式)</label>
+            <textarea id="ver-publickey" placeholder="粘贴发送方的公钥"></textarea>
+            <label for="ver-signedmessage">签名消息 (Armored)</label>
+            <textarea id="ver-signedmessage" placeholder="粘贴签名后的消息"></textarea>
+            <button id="btn-verify">验证签名</button>
+
+            <div class="error-message" id="verify-error"></div>
+
+            <h3>验证结果</h3>
+            <pre id="output-verifyresult" class="output" readonly></pre>
+        </section>
+
+    </main>
+
+<script>
+(async () => {
+    // 导航栏功能
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('sidebarToggle');
+    const navItems = sidebar.querySelectorAll('ul li');
+    const sections = document.querySelectorAll('main > section');
+
+    toggleBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+    });
+
+    navItems.forEach(li => {
+        li.addEventListener('click', () => {
+            // 选项高亮
+            navItems.forEach(i => i.classList.remove('active'));
+            li.classList.add('active');
+            // 匹配内容显示
+            const sectionId = li.dataset.section;
+            sections.forEach(sect => {
+                sect.id === sectionId ? sect.classList.add('active') : sect.classList.remove('active');
+            });
+        });
+    });
+
+    // 复制到剪贴板
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.copyTarget;
+            const text = document.getElementById(targetId).textContent;
+            if (!text) {
+                alert('没有可复制的内容！');
+                return;
+            }
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = '已复制';
+                setTimeout(() => { btn.textContent = '复制'; }, 2000);
+            }).catch(() => {
+                alert('复制失败，请手动复制。');
+            });
+        });
+    });
+
+    // 下载密钥文件
+    function downloadFile(filename, content) {
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('btn-download-publickey').addEventListener('click', () => {
+        const publicKey = document.getElementById('output-publickey').textContent;
+        if (!publicKey) {
+            alert('没有可下载的公钥！');
+            return;
+        }
+        downloadFile('publickey.asc', publicKey);
+    });
+
+    document.getElementById('btn-download-privatekey').addEventListener('click', () => {
+        const privateKey = document.getElementById('output-privatekey').textContent;
+        if (!privateKey) {
+            alert('没有可下载的私钥！');
+            return;
+        }
+        downloadFile('privatekey.asc', privateKey);
+    });
+
+    /* -------- 生成密钥 -------- */
+    document.getElementById('btn-generate').addEventListener('click', async () => {
+        const name = document.getElementById('gen-name').value.trim();
+        const email = document.getElementById('gen-email').value.trim();
+        const algorithm = document.getElementById('gen-algorithm').value;
+        const passphrase = document.getElementById('gen-passphrase').value;
+        const errorElem = document.getElementById('gen-error');
+        errorElem.textContent = '';
+
+        if (!name || !email || !passphrase) {
+            errorElem.textContent = '请填写姓名、电子邮件和密码短语！';
+            return;
+        }
+
+        let keyOptions = {
+            userIDs: [{ name, email }],
+            passphrase
+        };
+
+        try {
+            if (algorithm.startsWith('rsa')) {
+                keyOptions.type = 'rsa';
+                keyOptions.rsaBits = parseInt(algorithm.split('-')[1], 10);
+            } else if (algorithm.startsWith('ecc')) {
+                keyOptions.type = 'ecc';
+                keyOptions.curve = algorithm.split('-')[1];
+            }
+
+            const key = await openpgp.generateKey(keyOptions);
+            document.getElementById('output-publickey').textContent = key.publicKey;
+            document.getElementById('output-privatekey').textContent = key.privateKey;
+        } catch (err) {
+            errorElem.textContent = '密钥生成失败，请查看控制台！';
+            console.error(err);
+        }
+    });
+
+    /* -------- 导入密钥 -------- */
+    document.getElementById('btn-import-key').addEventListener('click', () => {
+        const keyType = document.getElementById('import-key-type').value;
+        const fileInput = document.getElementById('import-key-file');
+        const errorElem = document.getElementById('import-error');
+        errorElem.textContent = '';
+        const outputElem = document.getElementById('output-imported-key');
+        outputElem.textContent = '';
+
+        if (!fileInput.files.length) {
+            errorElem.textContent = '请选择要导入的密钥文件！';
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const keyContent = e.target.result;
+
+            try {
+                if (keyType === 'public') {
+                    await openpgp.readKey({ armoredKey: keyContent });
+                } else {
+                    await openpgp.readPrivateKey({ armoredKey: keyContent });
+                }
+                outputElem.textContent = keyContent;
+            } catch (err) {
+                errorElem.textContent = '密钥格式错误或解析失败，请检查密钥文件！';
+                console.error(err);
+            }
+        };
+        reader.readAsText(file);
+    });
+
+    /* -------- 加密消息 -------- */
+    document.getElementById('btn-encrypt').addEventListener('click', async () => {
+        const armoredPubKey = document.getElementById('enc-publickey').value.trim();
+        const messageText = document.getElementById('enc-message').value;
+        const errorElem = document.getElementById('enc-error');
+        errorElem.textContent = '';
+
+        if (!armoredPubKey) { errorElem.textContent = '请粘贴接收方公钥！'; return; }
+        if (!messageText) { errorElem.textContent = '请输入要加密的消息！'; return; }
+
+        try {
+            const publicKey = await openpgp.readKey({ armoredKey: armoredPubKey });
+            const encrypted = await openpgp.encrypt({
+                message: await openpgp.createMessage({ text: messageText }),
+                encryptionKeys: publicKey
+            });
+            document.getElementById('output-encrypted').textContent = encrypted;
+        } catch (err) {
+            errorElem.textContent = '加密失败，请检查公钥格式和消息！';
+            console.error(err);
+        }
+    });
+
+    /* -------- 解密消息 -------- */
+    document.getElementById('btn-decrypt').addEventListener('click', async () => {
+        const armoredPrivKey = document.getElementById('dec-privatekey').value.trim();
+        const passphrase = document.getElementById('dec-passphrase').value;
+        const encryptedText = document.getElementById('dec-message').value.trim();
+        const errorElem = document.getElementById('dec-error');
+        errorElem.textContent = '';
+
+        if (!armoredPrivKey) { errorElem.textContent = '请粘贴您的私钥！'; return; }
+        if (!passphrase) { errorElem.textContent = '请输入密码短语！'; return; }
+        if (!encryptedText) { errorElem.textContent = '请粘贴加密消息！'; return; }
+
+        try {
+            const privateKey = await openpgp.readPrivateKey({ armoredKey: armoredPrivKey });
+            const decryptedKey = await openpgp.decryptKey({ privateKey, passphrase });
+
+            const message = await openpgp.readMessage({ armoredMessage: encryptedText });
+
+            const { data: decrypted } = await openpgp.decrypt({
+                message,
+                decryptionKeys: decryptedKey
+            });
+
+            document.getElementById('output-decrypted').textContent = decrypted;
+        } catch (err) {
+            errorElem.textContent = '解密失败，请检查私钥、密码短语或加密数据！';
+            console.error(err);
+        }
+    });
+
+    /* -------- 签名消息 -------- */
+    document.getElementById('btn-sign').addEventListener('click', async () => {
+        const armoredPrivKey = document.getElementById('sign-privatekey').value.trim();
+        const passphrase = document.getElementById('sign-passphrase').value;
+        const messageText = document.getElementById('sign-message').value;
+        const errorElem = document.getElementById('sign-error');
+        errorElem.textContent = '';
+
+        if (!armoredPrivKey) { errorElem.textContent = '请粘贴您的私钥！'; return; }
+        if (!passphrase) { errorElem.textContent = '请输入密码短语！'; return; }
+        if (!messageText) { errorElem.textContent = '请输入要签名的消息！'; return; }
+
+        try {
+            const privateKey = await openpgp.readPrivateKey({ armoredKey: armoredPrivKey });
+            const decryptedKey = await openpgp.decryptKey({ privateKey, passphrase });
+
+            const signed = await openpgp.sign({
+                message: await openpgp.createMessage({ text: messageText }),
+                signingKeys: decryptedKey
+            });
+
+            document.getElementById('output-signed').textContent = signed;
+        } catch (err) {
+            errorElem.textContent = '签名失败，请检查私钥、密码短语和消息！';
+            console.error(err);
+        }
+    });
+
+    /* -------- 验证签名 -------- */
+    document.getElementById('btn-verify').addEventListener('click', async () => {
+        const armoredPubKey = document.getElementById('ver-publickey').value.trim();
+        const signedMessage = document.getElementById('ver-signedmessage').value.trim();
+        const errorElem = document.getElementById('verify-error');
+        errorElem.textContent = '';
+
+        if (!armoredPubKey) { errorElem.textContent = '请粘贴发送方的公钥！'; return; }
+        if (!signedMessage) { errorElem.textContent = '请粘贴签名后的消息！'; return; }
+
+        try {
+            const publicKey = await openpgp.readKey({ armoredKey: armoredPubKey });
+            const message = await openpgp.readMessage({ armoredMessage: signedMessage });
+            const verificationResult = await openpgp.verify({
+                message,
+                verificationKeys: publicKey
+            });
+
+            const { verified, keyID } = verificationResult.signatures[0];
+            try {
+                await verified; // 如果无效会抛错
+                document.getElementById('output-verifyresult').textContent = `签名有效，Key ID: ${keyID.toHex()}`;
+            } catch (error) {
+                document.getElementById('output-verifyresult').textContent = '签名无效！';
+            }
+        } catch (err) {
+            errorElem.textContent = '签名验证失败，请检查公钥和签名消息格式！';
+            console.error(err);
+        }
+    });
+
+})();
+</script>
+
+</body>
+</html>
